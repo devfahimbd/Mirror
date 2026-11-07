@@ -4,11 +4,12 @@
  * GitHub: https://github.com/devfahim/Mirror
  *
  * MirrorSession: Orchestrates ADB tunneling, server launch, control socket,
- * video frame reception, and lifecycle management.
+ * live video frame stream reception, and screencap fallback.
  */
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../adb/adb_manager.dart';
 import '../protocol/control_channel.dart';
@@ -37,9 +38,14 @@ class MirrorSession extends ChangeNotifier {
   int _videoWidth = 1080;
   int _videoHeight = 2400;
 
+  Uint8List? _currentFrame;
+  bool _receivedAnySocketFrame = false;
+
   Process? _serverProcess;
   Socket? _videoSocket;
   final ControlChannel control = ControlChannel();
+  Timer? _fallbackCheckTimer;
+  bool _isDisposed = false;
 
   MirrorSession({
     required this.deviceSerial,
@@ -57,6 +63,7 @@ class MirrorSession extends ChangeNotifier {
   int get screenHeight => _screenHeight;
   int get videoWidth => _videoWidth;
   int get videoHeight => _videoHeight;
+  Uint8List? get currentFrame => _currentFrame;
   double get aspectRatio => (_screenWidth > 0 && _screenHeight > 0) ? (_screenWidth / _screenHeight) : (9 / 19.5);
 
   /// Starts the complete mirroring session.
@@ -75,7 +82,7 @@ class MirrorSession extends ChangeNotifier {
 
         final pushed = await AdbManager.instance.pushServer(deviceSerial);
         if (!pushed) {
-          throw Exception('Failed to push mirror-server.jar to device.');
+          debugPrint('Warning: Could not push jar, will rely on ADB streaming fallback');
         }
 
         _statusMessage = 'Configuring high-speed ADB tunnels...';
@@ -97,7 +104,6 @@ class MirrorSession extends ChangeNotifier {
           debugPrint('[Server stderr] ${String.fromCharCodes(data)}');
         });
 
-        // Give the server a moment to open server sockets
         await Future.delayed(const Duration(milliseconds: 600));
       }
 
@@ -106,8 +112,9 @@ class MirrorSession extends ChangeNotifier {
       notifyListeners();
 
       try {
-        _videoSocket = await Socket.connect(host, videoPort, timeout: const Duration(seconds: 5));
+        _videoSocket = await Socket.connect(host, videoPort, timeout: const Duration(seconds: 4));
         _videoSocket!.setOption(SocketOption.tcpNoDelay, true);
+        _listenToVideoSocket();
       } catch (e) {
         debugPrint('Direct video socket connect error: $e');
       }
@@ -126,7 +133,14 @@ class MirrorSession extends ChangeNotifier {
       _statusMessage = 'Mirroring active';
       notifyListeners();
 
-      // Listen for socket closure
+      // Fallback monitor: if socket doesn't produce frames within 1.2s, start high-speed ADB screencap pump
+      _fallbackCheckTimer = Timer(const Duration(milliseconds: 1200), () {
+        if (!_receivedAnySocketFrame && !_isDisposed && _status == SessionStatus.mirroring) {
+          debugPrint('Starting ADB screencap stream fallback...');
+          _startAdbScreencapFallback();
+        }
+      });
+
       _videoSocket?.done.then((_) => _onDisconnected());
 
     } catch (e) {
@@ -134,6 +148,79 @@ class MirrorSession extends ChangeNotifier {
       _statusMessage = 'Error: $e';
       notifyListeners();
       await stop();
+    }
+  }
+
+  void _listenToVideoSocket() {
+    final List<int> streamBuffer = [];
+    bool headerParsed = false;
+
+    _videoSocket?.listen((List<int> chunk) {
+      streamBuffer.addAll(chunk);
+
+      // Parse 20-byte Header: [MIRR: 4B][screenWidth: 4B][screenHeight: 4B][videoWidth: 4B][videoHeight: 4B]
+      if (!headerParsed && streamBuffer.length >= 20) {
+        final bdata = ByteData.sublistView(Uint8List.fromList(streamBuffer.sublist(0, 20)));
+        final magic = bdata.getUint32(0, Endian.big);
+        if (magic == 0x4D495252) { // "MIRR"
+          _screenWidth = bdata.getInt32(4, Endian.big);
+          _screenHeight = bdata.getInt32(8, Endian.big);
+          _videoWidth = bdata.getInt32(12, Endian.big);
+          _videoHeight = bdata.getInt32(16, Endian.big);
+          headerParsed = true;
+          streamBuffer.removeRange(0, 20);
+          notifyListeners();
+        }
+      }
+
+      // Parse Frame Packets: [FRME: 4B][length: 4B][data...]
+      while (streamBuffer.length >= 8) {
+        final bdata = ByteData.sublistView(Uint8List.fromList(streamBuffer.sublist(0, 8)));
+        final magic = bdata.getUint32(0, Endian.big);
+
+        if (magic == 0x46524D45) { // "FRME"
+          final length = bdata.getInt32(4, Endian.big);
+          if (streamBuffer.length >= 8 + length) {
+            final frameBytes = Uint8List.fromList(streamBuffer.sublist(8, 8 + length));
+            streamBuffer.removeRange(0, 8 + length);
+
+            _currentFrame = frameBytes;
+            _receivedAnySocketFrame = true;
+            notifyListeners();
+          } else {
+            // Need more data
+            break;
+          }
+        } else {
+          // Sync search: advance 1 byte
+          streamBuffer.removeAt(0);
+        }
+      }
+    });
+  }
+
+  /// High-speed ADB screencap fallback loop ensuring the screen ALWAYS shows live frames!
+  void _startAdbScreencapFallback() async {
+    while (!_isDisposed && _status == SessionStatus.mirroring && !_receivedAnySocketFrame) {
+      try {
+        final adb = await AdbManager.instance.adbPath;
+        final res = await Process.run(
+          adb,
+          ['-s', deviceSerial, 'exec-out', 'screencap', '-p'],
+          stdoutEncoding: null,
+        );
+
+        if (res.exitCode == 0 && res.stdout is List<int>) {
+          final bytes = Uint8List.fromList(res.stdout as List<int>);
+          if (bytes.length > 100) {
+            _currentFrame = bytes;
+            notifyListeners();
+          }
+        }
+      } catch (e) {
+        debugPrint('Fallback screencap error: $e');
+      }
+      await Future.delayed(const Duration(milliseconds: 33)); // ~30 FPS
     }
   }
 
@@ -147,6 +234,8 @@ class MirrorSession extends ChangeNotifier {
 
   /// Terminates the mirroring session and cleans up resources.
   Future<void> stop() async {
+    _isDisposed = true;
+    _fallbackCheckTimer?.cancel();
     control.close();
     await _videoSocket?.close();
     _videoSocket?.destroy();
@@ -226,4 +315,3 @@ class MirrorSession extends ChangeNotifier {
     return AdbManager.instance.takeScreenshot(deviceSerial);
   }
 }
-

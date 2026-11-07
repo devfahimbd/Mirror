@@ -362,12 +362,19 @@ class _MirrorCinemaViewState extends State<MirrorCinemaView> {
   }
 
   Widget _buildActiveMirrorCanvas() {
+    if (widget.session.currentFrame != null) {
+      return Image.memory(
+        widget.session.currentFrame!,
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+      );
+    }
+
     return Container(
       color: const Color(0xFF0F111A),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Background Branding Watermark / Ambient Display
           Center(
             child: Opacity(
               opacity: 0.08,
@@ -378,16 +385,19 @@ class _MirrorCinemaViewState extends State<MirrorCinemaView> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.touch_app_rounded, color: Color(0xFFFF9100), size: 36),
-                const SizedBox(height: 10),
+                const SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Color(0xFFFF6D00)),
+                ),
+                const SizedBox(height: 14),
                 Text(
                   'Connected: ${widget.session.deviceSerial}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                  style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Interactive Remote Control Active\n(Click, Drag, Type with PC keyboard)',
-                  textAlign: TextAlign.center,
+                  'Syncing phone display stream...',
                   style: TextStyle(color: Colors.white38, fontSize: 11),
                 ),
               ],
