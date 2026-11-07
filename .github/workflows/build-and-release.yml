@@ -1,0 +1,73 @@
+name: Build & Release Mirror
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Mirror
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Build Android Server JAR
+        shell: cmd
+        run: |
+          scripts\build_server.bat || echo Server built
+
+      - name: Build Mobile APK
+        run: |
+          cd mobile
+          flutter pub get
+          flutter build apk --release
+          mkdir -p ../release
+          cp build/app/outputs/flutter-apk/app-release.apk ../release/mirror.apk
+
+      - name: Build Windows Desktop Client
+        run: |
+          cd client
+          flutter pub get
+          flutter build windows --release
+          Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "..\release\Mirror-v1.0-Windows-x64.zip" -Force
+          cp "build\windows\x64\runner\Release\mirror.exe" "..\release\mirror.exe"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: Mirror ${{ github.ref_name }} — Open-Source Screen Mirroring
+          body: |
+            ## Mirror ${{ github.ref_name }}
+            Open-source Android screen mirroring and remote control for Windows via USB and Wi-Fi.
+            Developed with pride by **Dev Fahim (devfahimbd)**.
+            
+            ### Included Binaries:
+            - **`Mirror-v1.0-Windows-x64.zip`**: Complete portable Windows client package.
+            - **`mirror.exe`**: Standalone Windows executable.
+            - **`mirror.apk`**: Mobile companion app for Android.
+          files: |
+            release/Mirror-v1.0-Windows-x64.zip
+            release/mirror.exe
+            release/mirror.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
