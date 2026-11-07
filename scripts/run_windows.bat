@@ -11,3 +11,4 @@ if exist "%EXE_PATH%" (
     cd "%~dp0..\client"
     call flutter run -d windows
 )
+

@@ -12,6 +12,9 @@ client/windows/flutter/ephemeral/
 server/.gradle/
 server/build/
 server/out/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
 *.class
 *.jar
 !server/libs/*.jar

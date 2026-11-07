@@ -17,14 +17,13 @@ if %errorlevel% neq 0 (
 echo ========================================================
 echo  [2/3] Building Android Companion APK...
 echo ========================================================
-cd "%~dp0..\mobile"
-call flutter pub get
-call flutter build apk --release
+cd "%~dp0..\mobile\android"
+call gradlew.bat assembleRelease
 if %errorlevel% neq 0 (
     echo [ERROR] Mobile APK build failed!
     exit /b %errorlevel%
 )
-copy /Y "build\app\outputs\flutter-apk\app-release.apk" "%~dp0..\release\mirror.apk"
+copy /Y "app\build\outputs\apk\release\app-release.apk" "%~dp0..\release\mirror.apk"
 
 echo ========================================================
 echo  [3/3] Building Windows Desktop Client EXE...
@@ -42,3 +41,4 @@ copy /Y "build\windows\x64\runner\Release\mirror.exe" "%~dp0..\release\mirror.ex
 echo ========================================================
 echo  SUCCESS: All components built into release\ folder!
 echo ========================================================
+

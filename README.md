@@ -62,7 +62,7 @@ Grab the ready-to-run releases from the [Releases](https://github.com/devfahim/M
 |---|---|---|
 | **Windows PC** | [**`Mirror-v1.0-Windows-x64.zip`**](https://github.com/devfahim/Mirror/releases/download/v1.0.0/Mirror-v1.0-Windows-x64.zip) | Complete standalone Windows bundle (Includes `mirror.exe`, DLLs, and embedded ADB tools). |
 | **Windows PC** | [**`mirror.exe`**](https://github.com/devfahim/Mirror/releases/download/v1.0.0/mirror.exe) | Standalone release executable. |
-| **Android Mobile** | [**`mirror.apk`**](https://github.com/devfahim/Mirror/releases/download/v1.0.0/mirror.apk) | Mobile Companion App for Wi-Fi pairing and streaming settings. |
+| **Android Mobile** | [**`mirror.apk`**](https://github.com/devfahim/Mirror/releases/download/v1.0.0/mirror.apk) | Ultra-lightweight Mobile Companion App (~1 MB) for Wi-Fi pairing and streaming settings. |
 
 ---
 
